@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: image cicd pipeline sam app
+
+Resources:
+  # Image CICD Pipeline
+  ImageCicdPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore: 
+        Location: codepipeline-us-east-1-106937909482
+        Type: S3
+      Name: !Sub ${AWS::StackName}-pipeline
+      RoleArn: arn:aws:iam::aws-account:role/service-role/AWSCodePipelineServiceRole-us-east-1-qe-cicd-pipeline
+      Stages: 
+        - Name: Source
+          Actions: 
+            - Name: Source
+              ActionTypeId: 
+                Category: Source 
+                Owner: AWS 
+                Version: "1"
+                Provider: ECR
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                RepositoryName: ecr-dev/beta_parallel
+                ImageTag: latest
+              RunOrder: 1
+
+        - Name: Test 
+          Actions:
+            - Name: manual-approval
+              ActionTypeId:
+                Category: Approval 
+                Owner: AWS 
+                Version: "1"
+                Provider: Manual
+              Configuration:
+                NotificationArn: arn:aws:sns:us-east-1:aws-account:***-sns
+                CustomData: "Confirm pushing DEV image to TEST repo"
+              RunOrder: 1
+
+            - Name: dev-to-test
+              InputArtifacts:
+                - Name: SourceArtifact 
+              ActionTypeId:
+                Category: Build 
+                Owner: AWS 
+                Version: "1"
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+                EnvironmentVariables: '[{"name":"IMAGE_SRC","value":"dev","type":"PLAINTEXT"}, {"name":"IMAGE_DES","value":"test","type":"PLAINTEXT"}, {"name":"CODEPIPELINE_NAME","value":"image-cicd-pipeline","type":"PLAINTEXT"}, {"name":"DYNAMODB_TABLE_NAME","value":"image-cicd-record","type":"PLAINTEXT"}]'
+              RunOrder: 2
+
+            - Name: run-test-statemachine
+              InputArtifacts:
+                - Name: SourceArtifact 
+              ActionTypeId:
+                Category: Invoke 
+                Owner: AWS 
+                Version: "1"
+                Provider: StepFunctions
+              Configuration:
+                StateMachineArn: arn:aws:states:us-east-1:aws-account:stateMachine:testing-pipeline-stateMachine
+                Input: '{"ExecutionName": "","batchjobCommand":["node","index.js"]}'
+              RunOrder: 3
+
+        - Name: Production 
+          Actions: 
+            - Name: manual-approval
+              ActionTypeId: 
+                Category: Approval 
+                Owner: AWS 
+                Version: "1"
+                Provider: Manual
+              Configuration:
+                NotificationArn: arn:aws:sns:us-east-1:aws-account:***-sns
+                CustomData: "Confirm pushing TEST image to PRODUCTION repo"
+              RunOrder: 1
+
+            - Name: test-to-prod
+              InputArtifacts: 
+                - Name: SourceArtifact 
+              ActionTypeId: 
+                Category: Build 
+                Owner: AWS 
+                Version: "1"
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+                EnvironmentVariables: '[{"name":"IMAGE_SRC","value":"test","type":"PLAINTEXT"}, {"name":"IMAGE_DES","value":"prod","type":"PLAINTEXT"}, {"name":"CODEPIPELINE_NAME","value":"image-cicd-pipeline","type":"PLAINTEXT"}, {"name":"DYNAMODB_TABLE_NAME","value":"image-cicd-record","type":"PLAINTEXT"}]'
+              RunOrder: 2
+
+  # CodeBuild Project
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      BadgeEnabled: False
+      Environment: 
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Type: LINUX_CONTAINER
+      LogsConfig: 
+        CloudWatchLogs: 
+          Status: ENABLED
+        S3Logs: 
+          Status: DISABLED
+      Name: !Sub ${AWS::StackName}-codebuild-project
+      ServiceRole: arn:aws:iam::aws-account:role/service-role/codebuild-cicd-service-role
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          env:
+            shell: bash
+          phases:
+            build:
+              commands:
+                # Pushing ECR image to TEST/PROD repo
+                # ECR image Update strategy:
+                # 1. Get the last numerical version number before LATEST
+                # 2. Retag numerical version number to current LATEST
+                # 3. Push the new image to ECR (ECR auto update LATEST tag)
+                # Get current pipeline execution id from cli
+                - exec_id=`aws codepipeline list-pipeline-executions --pipeline-name ${CODEPIPELINE_NAME}| jq -r '.pipelineExecutionSummaries[] | select(.status == "InProgress").pipelineExecutionId' | tail -n 1` 
+                - echo "current execution id is ${exec_id}"
+                # Get ECR repo name from DynamoDB
+                - ecr_repo=`aws dynamodb get-item --table-name ${DYNAMODB_TABLE_NAME} --key '{"execution_id":{"S":"'${exec_id}'"}}' --query Item.ecr_repo.S --output text`
+                - echo "ecr repo is ${ecr_repo}"
+                - image_name=${ecr_repo#*/}
+                # Login to aws ECR
+                - echo "logging in to AWS ECR"
+                - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin aws-account.dkr.ecr.us-east-1.amazonaws.com
+                - echo "done ..."
+                # 1. Get the last numerical version number before LATEST
+                - LAST_VERSION=`aws ecr describe-images --repository-name "ecr-${IMAGE_DES}/${image_name}" --region us-east-1 --query 'imageDetails[].[imageTags[]]' --output text | sort -V | tail -n 2`
+                - LAST_VERSION=$(echo "$LAST_VERSION" | awk 'NR==1')
+                - |
+                  if [[ $LAST_VERSION =~ [[:space:]] ]]; then
+                    # 3. Push the new image to ECR (ECR auto update LATEST tag)
+                    echo "LAST_VERSION:0.1"
+                    docker pull aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name}
+                    docker tag aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name} aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+                    docker push aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+                  else
+                    MAJOR_NUM="${LAST_VERSION%%.*}"
+                    VERSION_NUM="${LAST_VERSION#*.}"
+                    ((VERSION_NUM++))
+                    LAST_VERSION="${MAJOR_NUM}.${VERSION_NUM}"
+                    echo "LAST_VERSION:${LAST_VERSION}"
+                    # 2. Retag numerical version number to current LATEST
+                    echo "retagging latest image on ECR"
+                    MANIFEST=$(aws ecr batch-get-image --region us-east-1 --repository-name "ecr-${IMAGE_DES}/${image_name}" --image-ids imageTag=latest --output text --query images[].imageManifest)
+                    aws ecr put-image --region us-east-1 --repository-name "ecr-${IMAGE_DES}/${image_name}" --image-tag ${LAST_VERSION} --image-manifest "$MANIFEST"
+                    echo "done ..."
+                    # 3. Push the new image to ECR (ECR auto update LATEST tag)
+                    docker pull aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name}
+                    docker tag aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name} aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+                    docker push aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+                  fi
+
+
+  # Lambda Functions
+  UpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-update-function
+      Role: arn:aws:iam::aws-account:role/lambda-basic-role
+      CodeUri: functions/update-function/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          CODEPIPELINE_NAME: !Sub ${AWS::StackName}-pipeline
+          DYNAMODB_TABLE_NAME: !Sub ${AWS::StackName}-record
+      MemorySize: 10240
+      EphemeralStorage:
+        Size: 10240
+      Timeout: 900
+      Architectures:
+        - x86_64
+
+  RollbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-rollback-function
+      Role: arn:aws:iam::aws-account:role/lambda-basic-role
+      CodeUri: functions/rollback-function/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          CODEPIPELINE_NAME: !Sub ${AWS::StackName}-pipeline
+          DYNAMODB_TABLE_NAME: !Sub "${AWS::StackName}-record"
+      MemorySize: 10240
+      EphemeralStorage:
+        Size: 10240
+      Timeout: 900
+      Architectures:
+        - x86_64
+
+  # Lambda Permissions
+  PermissionForEventsToInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        !Ref UpdateFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "EcrEventRule"
+          - "Arn"
+
+  # DynamoDB Table
+  CicdRecordTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      AttributeDefinitions: 
+        - AttributeName: execution_id
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: execution_id
+          KeyType: HASH
+      TableName: !Sub ${AWS::StackName}-record
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  # EventBridge Rule
+  EcrEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Event rule to automatically start image-cicd-pipeline when new changes occur in ECRs.
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.ecr
+        detail:
+          action-type:
+            - PUSH
+          image-tag:
+            - latest
+          repository-name:
+            - ecr-dev/repo-1
+            - ecr-dev/repo-2
+            - ecr-dev/repo-3
+            - ecr-dev/repo-4
+          result:
+            - SUCCESS
+        detail-type:
+          - ECR Image Action
+      Name: !Sub ${AWS::StackName}-ecr-rule
+      State: ENABLED
+      Targets:
+        - Id: Id1e91256d-e682-45ec-90e8-5fa90410b18a
+          Arn: !GetAtt UpdateFunction.Arn
+        - Id: Id4c0e672a-c588-4c4e-84ab-93dd07914020
+          Arn: !GetAtt EventRuleLogGroup.Arn
+
+  # CloudWatch Log Group
+  EventRuleLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub ${AWS::StackName}-eventRule-logGroup

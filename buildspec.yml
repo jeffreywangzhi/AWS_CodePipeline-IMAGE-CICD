@@ -1,0 +1,48 @@
+version: 0.2
+env:
+  shell: bash
+phases:
+  build:
+    commands:
+      # Pushing ECR image to TEST/PROD repo
+      # ECR image Update strategy:
+      # 1. Get the last numerical version number before LATEST
+      # 2. Retag numerical version number to current LATEST
+      # 3. Push the new image to ECR (ECR auto update LATEST tag)
+      # Get current pipeline execution id from cli
+      - exec_id=`aws codepipeline list-pipeline-executions --pipeline-name ${CODEPIPELINE_NAME}| jq -r '.pipelineExecutionSummaries[] | select(.status == "InProgress").pipelineExecutionId' | tail -n 1` 
+      - echo "current execution id is ${exec_id}"
+      # Get ECR repo name from DynamoDB
+      - ecr_repo=`aws dynamodb get-item --table-name ${DYNAMODB_TABLE_NAME} --key '{"execution_id":{"S":"'${exec_id}'"}}' --query Item.ecr_repo.S --output text`
+      - echo "ecr repo is ${ecr_repo}"
+      - image_name=${ecr_repo#*/}
+      # Login to aws ECR
+      - echo "logging in to AWS ECR"
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin aws-account.dkr.ecr.us-east-1.amazonaws.com
+      - echo "done ..."
+      # 1. Get the last numerical version number before LATEST
+      - LAST_VERSION=`aws ecr describe-images --repository-name "ecr-${IMAGE_DES}/${image_name}" --region us-east-1 --query 'imageDetails[].[imageTags[]]' --output text | sort -V | tail -n 2`
+      - LAST_VERSION=$(echo "$LAST_VERSION" | awk 'NR==1')
+      - |
+        if [[ $LAST_VERSION =~ [[:space:]] ]]; then
+          # 3. Push the new image to ECR (ECR auto update LATEST tag)
+          echo "LAST_VERSION:0.1"
+          docker pull aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name}
+          docker tag aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name} aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+          docker push aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+        else
+          MAJOR_NUM="${LAST_VERSION%%.*}"
+          VERSION_NUM="${LAST_VERSION#*.}"
+          ((VERSION_NUM++))
+          LAST_VERSION="${MAJOR_NUM}.${VERSION_NUM}"
+          echo "LAST_VERSION:${LAST_VERSION}"
+          # 2. Retag numerical version number to current LATEST
+          echo "retagging latest image on ECR"
+          MANIFEST=$(aws ecr batch-get-image --region us-east-1 --repository-name "ecr-${IMAGE_DES}/${image_name}" --image-ids imageTag=latest --output text --query images[].imageManifest)
+          aws ecr put-image --region us-east-1 --repository-name "ecr-${IMAGE_DES}/${image_name}" --image-tag ${LAST_VERSION} --image-manifest "$MANIFEST"
+          echo "done ..."
+          # 3. Push the new image to ECR (ECR auto update LATEST tag)
+          docker pull aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name}
+          docker tag aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_SRC}/${image_name} aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+          docker push aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${IMAGE_DES}/${image_name}
+        fi
