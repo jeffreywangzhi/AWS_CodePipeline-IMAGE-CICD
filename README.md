@@ -2,7 +2,7 @@
 
 ## Overview ##
 
-This is a severless Image CICD application created from AWS SAM template (AWS Cloud Formation), this project will consist of AWS serverless services and development codes that are used in the Image CICD pipeline, for instances: CodePipeline, CodeBuild project, Lambda Functions, etc.
+This is a severless Image CICD application created from AWS SAM template (AWS Cloud Formation), this project consists of AWS serverless services and development codes that are used in the Image CICD pipeline, for instances: CodePipeline, CodeBuild project, Lambda Functions, etc.
 ![cicd_workflow.png](src/cicd_workflow.png)
 
 ## Table of Contents ##
