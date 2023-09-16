@@ -180,7 +180,7 @@ Successfully updated stack
 ```
 Source action changed
 We will update the following resources to detect changes for your updated pipeline.
-Add	| Pipeline image-cicd-pipeline as a target to Amazon CloudWatch Events rule
+Add | Pipeline image-cicd-pipeline as a target to Amazon CloudWatch Events rule
 ```
 3. Please check the checkbox and ensure **No resource updates needed for this source action change** to avoid AWS automatically overrides the settings of EventBridge Rule.
 ```
