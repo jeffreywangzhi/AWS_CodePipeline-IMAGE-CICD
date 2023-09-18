@@ -62,9 +62,9 @@ $ ./build.sh
 ```bash
 $ ./rollback.sh
 ```
-2. Select the ECR repo you want to rollback by entering numerical option.
+2. Select the ECR repo you want to roll back by entering the numerical option.
 ```bash
-Please select the ECR repo you want to rollback by entering option number:
+Please select the ECR repo you want to rollback by entering the option number:
 1) ecr-prod/repo-1
 2) ecr-prod/repo-2
 3) ecr-prod/repo-3
