@@ -75,7 +75,7 @@ Please select the ECR repo you want to rollback by entering the option number:
 Chosen option: ecr-prod/repo-1
 Confirm rollback in ecr-prod/repo-1? (y/n): y
 ```
-3. After confirming rollback, you can see the output and results from rollback lambda function.
+3. After confirming rollback, you can see the output and results from the rollback lambda function.
 ```
 Rollback from v0.15 to v0.14
 Rollback completed
@@ -96,7 +96,7 @@ Rollback completed
 3. Following the success of image pushing, the Test stage invokes the test statemachine for testing the updated image in the Test repo.
 
 **[Production Stage]**
-1. After successfully proceeded all of the above tasks and tests, the Production stage sends a notification via SNS and waits for manual approval to deploy.
+1. After successfully proceeding with all of the above tasks and tests, the Production stage sends a notification via SNS and waits for manual approval to deploy.
 2. After receiving approval from the user, the Production stage begins building and pushing the updated image in Test repo to Production repo.
 
 ## Modifying Pipeline <a name = "modify"></a> ##
