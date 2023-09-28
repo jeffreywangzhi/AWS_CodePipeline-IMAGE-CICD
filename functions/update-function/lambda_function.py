@@ -1,3 +1,4 @@
+import jmespath
 import boto3
 import uuid
 import re
@@ -30,6 +31,47 @@ def lambda_handler(event, context):
             'error': str(ve)
         }
     
+    # Ignore update if triggered by rollback action
+    try:
+        # Open dynamodb connection
+        client = boto3.client('dynamodb')
+        tableName = os.environ['DYNAMODB_TABLE_NAME']
+        # Define scan expressions
+        projection_expression = '#d, #a'
+        expression_attribute_names = {
+            '#d': 'date',
+            '#a': 'action'
+        }
+        # Scan dynamodb date and action
+        response = client.scan(
+            TableName=tableName,
+            ProjectionExpression=projection_expression,
+            ExpressionAttributeNames=expression_attribute_names
+        )
+        # Sort and get the latest rollback record
+        sorted_items = [{'date': response['Items']['date']['S'], 'action': response['Items']['action']['S']} for response['Items'] in sorted(response['Items'], key=lambda x: x['date']['S']) if response['Items']['action']['S'] == 'rollback']
+        last_item = sorted_items[-1]
+        # Check whether the update process was triggered by rollback action
+        last_rollback_date = datetime.fromisoformat(last_item["date"]).astimezone(timezone(timedelta(hours=8)))
+        print("last rollback timestamp: ", last_rollback_date)
+        current_date = datetime.now(timezone(timedelta(hours=8)))
+        print("current timestamp: ", current_date)
+        time_difference = current_date - last_rollback_date
+        print("time difference: ", time_difference)     
+        # Skip update process if update process was triggered by rollback action
+        if time_difference < timedelta(seconds=5):
+            print("image cicd pipeline skipped.")
+            return{
+                'status': "SKIPPED"
+            }
+    except Exception as e:
+        print(f"Identification Error: {e}")
+        return {
+            'status': "failed to identify the trigger source.",
+            'error': str(e)
+        }
+    
+    # Start image cicd
     try:
         # Get the last numerical version number before LATEST
         ecr_client = boto3.client("ecr")
