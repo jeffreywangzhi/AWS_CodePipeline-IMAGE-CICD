@@ -86,6 +86,6 @@ if [ "$confirmation" == "y" ]; then
     docker push aws-account.dkr.ecr.us-east-1.amazonaws.com/ecr-${chosen_option_des}/${chosen_option_image}
   fi
 else
-  echo "transfer cancelled"
+  echo "transfer canceled"
 fi
 

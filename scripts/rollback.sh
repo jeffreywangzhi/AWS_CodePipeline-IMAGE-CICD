@@ -65,5 +65,5 @@ if [ "$confirmation" == "y" ]; then
         --query 'LogResult' \
         --output text | base64 -d
 else
-    echo "Rollback cancelled"
+    echo "Rollback canceled"
 fi
