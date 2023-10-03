@@ -13,6 +13,7 @@ This is a serverless Docker image CICD application created from AWS SAM template
 - [Update Image](#update)
 - [Rollback Image](#rollback)
 - [Elaboration](#elaboration)
+- [Concurrent Executions](#concurrent)
 - [Modifying Pipeline](#modify)
 - [Usage](#usage)
 - [Author](#author)
@@ -48,7 +49,7 @@ Successfully created/updated stack
 
 ## Update Image <a name = "update"></a> ##
 
-1. Use the **build.sh** shell script in the target image repository to push a new version of image to DEV ECR repo.
+1. Use the **build_cicd.sh** shell script in the target image repository to push a new version of image to DEV ECR repo.
 
 ```bash
 $ ./build.sh
@@ -57,25 +58,33 @@ $ ./build.sh
 
 ## Rollback Image <a name = "rollback"></a> ##
 
-1. Use the **rollback.sh** shell script to rollback versions in Production ECR repo.
+1. Use **rollback.sh** shell script in the *scripts folder* to rollback versions in ECR repos.
 
 ```bash
 $ ./rollback.sh
 ```
-2. Select the ECR repo you want to roll back by entering the numerical option.
+2. Select the ECR environment you want to rollback by entering option number.
 ```bash
-Please select the ECR repo you want to rollback by entering the option number:
-1) ecr-prod/repo-1
-2) ecr-prod/repo-2
-3) ecr-prod/repo-3
-4) ecr-prod/repo-4
+Please select the ECR environment you want to rollback by entering option number:
+1) ecr-dev
+2) ecr-test
+3) ecr-prod
+#?
+```
+3. Select the ECR image you want to rollback by entering option number.
+```bash
+Please select the ECR image you want to rollback by entering option number:
+1) repo-1
+2) repo-2
+3) repo-3
 #?
 ```
 ```
-Chosen option: ecr-prod/repo-1
-Confirm rollback in ecr-prod/repo-1? (y/n): y
+Chosen ECR environment: dev
+Chosen ECR image: repo-1
+Confirm rollback in ecr-dev/repo-1? (y/n): y
 ```
-3. After confirming rollback, you can see the output and results from the rollback lambda function.
+3. After confirming rollback, you can see the output and results from rollback lambda function.
 ```
 Rollback from v0.15 to v0.14
 Rollback completed
@@ -134,23 +143,23 @@ EcrEventRule:
           - ecr-dev/repo-1
           - ecr-dev/new-repo
 ```
-4. Add new **PROD** repos to **rollback.sh** rollback options. 
+4. Add new image options to **rollback.sh** shell script in the *scripts folder*. 
 ```bash
 # rollback.sh (Partial)
 # Define the ECR repo options
-options=("ecr-prod/repo-1" "ecr-prod/new-repo")
+options=("repo" "new-repo")
 ```
 ```bash
 # rollback.sh (Partial)
-# Prompt the user to select an ECR repo
-select opt in "${options[@]}"; do
-    case $opt in
-        "ecr-prod/repo-1")
-            chosen_option="ecr-prod/repo-1"
+# Prompt the user to select an ECR image
+select image in "${options_image[@]}"; do
+    case $image in
+        "repo")
+            chosen_option_image="repo"
             break
             ;;
-        "ecr-prod/new-repo")
-            chosen_option="ecr-prod/new-repo"
+        "new-repo")
+            chosen_option_image="new-repo"
             break
             ;;
         *)
