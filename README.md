@@ -106,7 +106,7 @@ Rollback completed
 
 **[Production Stage]**
 1. After successfully proceeding with all of the above tasks and tests, the Production stage sends a notification via SNS and waits for manual approval to deploy.
-2. After receiving approval from the user, the Production stage begins building and pushing the updated image in Test repo to Production repo.
+2. After receiving approval from the user, the Production stage begins building and pushing the updated image from Test repo to Production repo.
 
 ## Modifying Pipeline <a name = "modify"></a> ##
 * ### Adding new ECR repos to Image CICD pipeline
