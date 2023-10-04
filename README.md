@@ -84,7 +84,7 @@ Chosen ECR environment: dev
 Chosen ECR image: repo-1
 Confirm rollback in ecr-dev/repo-1? (y/n): y
 ```
-3. After confirming rollback, you can see the output and results from rollback lambda function.
+3. After confirming rollback, you can see the output and results from the rollback lambda function.
 ```
 Rollback from v0.15 to v0.14
 Rollback completed
